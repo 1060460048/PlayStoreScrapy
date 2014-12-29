@@ -71,9 +71,6 @@ class PlayStoreSpider(scrapy.Spider):
                     'ipf': '1',
                     'xhr': '1',
                 },
-                meta={
-                    'url_set': set(),
-                },
                 callback=self.parse))
 
         return requests
@@ -84,18 +81,17 @@ class PlayStoreSpider(scrapy.Spider):
         """
 
         if self.is_max_item_reached():
+            log.msg("**** Max Item reached", level=log.DEBUG)
             return
 
         log.msg("**** Scraping: " + response.url, level=log.INFO)
 
-        url_set = response.meta.get('url_set')
-
         app_urls = Selector(xpath=self.APP_URLS).get_value_list(response)
         for url in app_urls:
-            if url not in url_set:
-                url_set.add(url)
-                yield scrapy.Request(AppItem.APP_URL_PREFIX + url + "&hl=en", callback=self.parse_app_url)
+            # parse app detail page
+            yield scrapy.Request(AppItem.APP_URL_PREFIX + url + "&hl=en", callback=self.parse_app_url)
         else:
+            # parse next stream data if exist
             page_token = self.get_page_token(response.body)
             if page_token is not None:
                 yield scrapy.FormRequest(
@@ -104,9 +100,6 @@ class PlayStoreSpider(scrapy.Spider):
                         'ipf': '1',
                         'xhr': '1',
                         'pagTok': page_token,
-                    },
-                    meta={
-                        'url_set': url_set,
                     },
                     callback=self.parse)
 
@@ -140,7 +133,7 @@ class PlayStoreSpider(scrapy.Spider):
         """
 
         if self.is_max_item_reached():
-            log.msg("**** Max Item reached", level=log.INFO)
+            log.msg("**** Max Item reached", level=log.DEBUG)
             # Stop the crawling if max item reached
             self.crawler.engine.close_spider(self, "Max Item reached")
             return
