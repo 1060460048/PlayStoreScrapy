@@ -33,6 +33,7 @@ class PlayStoreSpider(scrapy.Spider):
             for keyword in arr_keywords:
                 self.start_urls.append(self.CRAWL_URL.format(keyword.strip()))
         else:
+            self.show_help()
             raise ValueError('"keywords" parameter is required')
 
         try:
@@ -49,6 +50,15 @@ class PlayStoreSpider(scrapy.Spider):
             self.output_file = output.strip()
         else:
             raise ValueError('"output" parameter is invalid: ' + str(output))
+
+    @staticmethod
+    def show_help():
+        print '\n>>> Command Usage: scrapy crawl playstorescrapy -a keywords=<comma_separated_keywords> [options]'
+        print '>>> Options:'
+        print '>>>  -a max_item=<number>\t\tSpecify maximum number of scraped items (default=0)'
+        print '>>>  -a output=<filename>\t\tSpecify output filename path (default=item.csv)'
+        print '>>>  -a download_delay=<number>\t\tSpecify download delay in seconds (default=0)'
+        print ''
 
     # override
     def start_requests(self):
@@ -76,7 +86,7 @@ class PlayStoreSpider(scrapy.Spider):
         if self.is_max_item_reached():
             return
 
-        log.msg("==== Scraping: " + response.url, level=log.INFO)
+        log.msg("**** Scraping: " + response.url, level=log.INFO)
 
         url_set = response.meta.get('url_set')
 
@@ -130,7 +140,7 @@ class PlayStoreSpider(scrapy.Spider):
         """
 
         if self.is_max_item_reached():
-            log.msg("==== Max Item reached", level=log.INFO)
+            log.msg("**** Max Item reached", level=log.INFO)
             # Stop the crawling if max item reached
             self.crawler.engine.close_spider(self, "Max Item reached")
             return
@@ -139,9 +149,9 @@ class PlayStoreSpider(scrapy.Spider):
         yield loader.load_item()
 
         self.item_count += 1
-        log.msg("==== Item Count: " + str(self.item_count), level=log.INFO)
+        log.msg("**** Item Count: " + str(self.item_count), level=log.INFO)
 
     # override
     def closed(self, reason):
-        log.msg("==== Spider has stopped. Reason: " + reason +
+        log.msg("**** Spider has stopped. Reason: " + reason +
                 ". Total Scraped Items: " + str(self.item_count), level=log.INFO)
