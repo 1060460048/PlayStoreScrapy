@@ -7,7 +7,7 @@ from scraper.selector import Selector
 
 class PlayStoreSpider(scrapy.Spider):
     name = 'playstorescrapy'
-    allowed_domains = ["play.google.com"]
+    allowed_domains = ["google.com"]
     start_urls = []
 
     CRAWL_URL = 'https://play.google.com/store/search?q={0}&c=apps'
@@ -16,14 +16,17 @@ class PlayStoreSpider(scrapy.Spider):
     # count how many items have been scraped
     item_count = 0
 
-    def __init__(self, keywords=None, max_item=0, download_delay=0, output='item.csv', *args, **kwargs):
+    def __init__(self, keywords=None, max_item=0, download_delay=0, output='item.csv',
+                 email=None, password=None, *args, **kwargs):
         """
-        :param keywords: search keywords separated by comma (required)
-        :param max_item: maximum items to be scraped
-        :param download_delay: download delay (in seconds)
-        :param output: output filepath
-        :param args: additional list of arguments
-        :param kwargs: additional dictionary of arguments
+        :param keywords: search keywords separated by comma (required).
+        :param max_item: maximum items to be scraped.
+        :param download_delay: download delay (in seconds).
+        :param output: output filename path.
+        :param email: login email.
+        :param password: login password.
+        :param args: additional list of arguments.
+        :param kwargs: additional dictionary of arguments.
         """
 
         super(PlayStoreSpider, self).__init__(*args, **kwargs)
@@ -51,17 +54,106 @@ class PlayStoreSpider(scrapy.Spider):
         else:
             raise ValueError('"output" parameter is invalid: ' + str(output))
 
+        if email:
+            self.email = email.strip().lower()
+            if password:
+                self.password = password
+            else:
+                import getpass
+                self.password = getpass.getpass('Please enter password: ')
+        else:
+            self.email = None
+            self.password = None
+
     @staticmethod
     def show_help():
         print '\n>>> Command Usage: scrapy crawl playstorescrapy -a keywords=<comma_separated_keywords> [options]'
         print '>>> Options:'
-        print '>>>  -a max_item=<number>\t\tSpecify maximum number of scraped items (default=0)'
-        print '>>>  -a output=<filename>\t\tSpecify output filename path (default=item.csv)'
-        print '>>>  -a download_delay=<number>\t\tSpecify download delay in seconds (default=0)'
+        print '>>>  -a max_item=<number>          Specify maximum number of scraped items (default=0)'
+        print '>>>  -a output=<filename>          Specify output filename path (default=item.csv)'
+        print '>>>  -a download_delay=<number>    Specify download delay in seconds (default=0)'
+        print '>>>  -a email=<email>              Specify login email'
+        print '>>>  -a "password=<password>"      Specify login password (note: need to be enclosed with double-quotes)'
         print ''
 
     # override
     def start_requests(self):
+        """
+        If email is provided, go to login process first.
+        If email is not provided, directly launch the scraping requests.
+        """
+
+        if self.email:
+            return self.open_google()
+        else:
+            return self.launch_requests()
+
+    def open_google(self):
+        """
+        Open google page to set up the cookie before login.
+        """
+
+        return [scrapy.Request('https://accounts.google.com/ServiceLogin?hl=en&continue=https://www.google.com/%3Fgws_rd%3Dssl',
+                               callback=self.login)]
+
+    def login(self, response):
+        """
+        Login to google account.
+        """
+
+        galx = ''
+        match = re.search(r'<input\s+name="GALX"[\s\S]+?value="(.+?)">', response.body, flags=re.M)
+        if match:
+            galx = match.group(1)
+        return [
+            scrapy.FormRequest("https://accounts.google.com/ServiceLoginAuth",
+                               callback=self.after_login,
+                               formdata={
+                                   'Email': self.email,
+                                   'Passwd': self.password,
+                                   'PersistentCookie': 'yes',
+                                   'GALX': galx,
+                                   'continue': 'https://www.google.com/?gws_rd=ssl',
+                                   'hl': 'en',
+                               })
+        ]
+
+    def is_login_success(self, response):
+        """
+        Check if login is success.
+        :param response: Response object.
+        :return: True if success else False.
+        """
+
+        email = re.escape(self.email)
+        regex = r'<div\s+id="mngb">.+<span.+>' + email + r'\<'
+        if re.search(regex, response.body):
+            self.email = None
+            self.password = None
+            return True
+        else:
+            return False
+
+    def after_login(self, response):
+        """
+        Check if login success or not.
+        If success, continue to scrape the pages.
+        """
+
+        if self.is_login_success(response):
+            log.msg("**** Login success", level=log.INFO)
+            self.email = None
+            self.password = None
+            return self.launch_requests()
+        else:
+            log.msg("**** Login failed", level=log.WARNING)
+            return
+
+    def launch_requests(self):
+        """
+        Launch the scraping requests for each of keywords.
+        """
+
         requests = []
 
         for url in self.start_urls:
@@ -71,11 +163,11 @@ class PlayStoreSpider(scrapy.Spider):
                     'ipf': '1',
                     'xhr': '1',
                 },
-                callback=self.parse))
+                callback=self.parse_search_page))
 
         return requests
 
-    def parse(self, response):
+    def parse_search_page(self, response):
         """
         Parse search page.
         """
@@ -101,12 +193,12 @@ class PlayStoreSpider(scrapy.Spider):
                         'xhr': '1',
                         'pagTok': page_token,
                     },
-                    callback=self.parse)
+                    callback=self.parse_search_page)
 
     def is_max_item_reached(self):
         """
         Check if max_item has been reached.
-        :return: True if max_item has been reached else False
+        :return: True if max_item has been reached else False.
         """
 
         return self.max_item > 0 and self.item_count >= self.max_item
@@ -129,7 +221,7 @@ class PlayStoreSpider(scrapy.Spider):
 
     def parse_app_url(self, response):
         """
-        Parse App detail page
+        Parse App detail page.
         """
 
         if self.is_max_item_reached():
@@ -143,6 +235,10 @@ class PlayStoreSpider(scrapy.Spider):
 
         self.item_count += 1
         log.msg("**** Item Count: " + str(self.item_count), level=log.INFO)
+
+    # override
+    def parse(self, response):
+        pass
 
     # override
     def closed(self, reason):
